@@ -6,10 +6,11 @@ docker_tty='-i'
 pinata=$(docker ps -qf name=pinata-sshd)
 test -z "$pinata" -o ! -f ~/.pinata-sshd/known_hosts && pinata-ssh-forward
 command=$(basename $0)
+bindir=$(dirname $0)
 container=$(readlink $0)
-trampoline=$(dirname $0)/trampoline
+trampoline=${bindir}/trampoline
 container=${container:-$command}
-containerpath=$(dirname $0)/$container
+containerpath=${bindir}/$container
 case $command in
 	with)
 		command=""
@@ -24,28 +25,28 @@ case $command in
 		fi
 		container=$1
 		if [ "$container" = "upgrade" ]; then
-			currentinode=$(ls -i dockerize | cut -f1 -d' ')
-			test -d $(dirname $0)/.dockerize.git || \
-			  git clone --mirror git@github.com:FutureAdvisor/dockerize $(dirname $0)/.dockerize.git
-			git --git-dir $(dirname $0)/.dockerize.git fetch --prune
-			if diff <(git --git-dir $(dirname $0)/.dockerize.git show master:dockerize) $0 >/dev/null; then
+			currentinode=$(ls -i ${bindir}/dockerize | cut -f1 -d' ')
+			test -d ${bindir}/.dockerize.git || \
+			  git clone --mirror git@github.com:FutureAdvisor/dockerize ${bindir}/.dockerize.git
+			git --git-dir ${bindir}/.dockerize.git fetch --prune
+			if diff <(git --git-dir ${bindir}/.dockerize.git show master:dockerize) $0 >/dev/null; then
 				echo "up to date"
 			else
-				git --git-dir $(dirname $0)/.dockerize.git show master:dockerize > $0
-				newinode=$(ls -i dockerize | cut -f1 -d' ')
+				git --git-dir ${bindir}/.dockerize.git show master:dockerize > $0
+				newinode=$(ls -i ${bindir}/dockerize | cut -f1 -d' ')
 				if [ "$newinode" -ne "$currentinode" ]; then
-					for file in $(find $(dirname $0) -inum $currentinode -a ! -name dockerize); do
+					for file in $(find ${bindir} -inum $currentinode -a ! -name dockerize); do
 						rm $file
-						ln $(dirname $0)/dockerize $file
+						ln ${bindir}/dockerize $file
 					done
 				fi
 				exec "$0" "$@"
 			fi
 		else
 			shift
-			test ! -e $(dirname $0)/${container} && ln ${containerpath} $(dirname $0)/${container}
+			test ! -e ${bindir}/${container} && ln ${containerpath} ${bindir}/${container}
 			for cmd in "$@"; do
-				test ! -e $(dirname $0)/${cmd} && ln -s ${container} $(dirname $0)/${cmd}
+				test ! -e ${bindir}/${cmd} && ln -s ${container} ${bindir}/${cmd}
 			done
 		fi
 		exit 0
