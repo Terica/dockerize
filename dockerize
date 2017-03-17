@@ -24,6 +24,7 @@ case $command in
 		fi
 		container=$1
 		if [ "$container" = "upgrade" ]; then
+			currentinode=$(ls -i dockerize | cut -f1 -d' ')
 			test -d $(dirname $0)/.dockerize.git || \
 			  git clone --mirror git@github.com:FutureAdvisor/dockerize $(dirname $0)/.dockerize.git
 			git --git-dir $(dirname $0)/.dockerize.git fetch --prune
@@ -31,6 +32,13 @@ case $command in
 				echo "up to date"
 			else
 				git --git-dir $(dirname $0)/.dockerize.git show master:dockerize > $0
+				newinode=$(ls -i dockerize | cut -f1 -d' ')
+				if [ "$newinode" -ne "$currentinode" ]; then
+					for file in $(find $(dirname $0) -inum $currentinode -a ! -name dockerize); do
+						rm $file
+						ln $(dirname $0)/dockerize $file
+					done
+				fi
 				exec "$0" "$@"
 			fi
 		else
