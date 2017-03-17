@@ -26,8 +26,10 @@ case $command in
 		if [ "$container" = "upgrade" ]; then
 			test -d $(dirname $0)/.dockerize.git || \
 			  git clone --bare git@github.com:FutureAdvisor/dockerize $(dirname $0)/.dockerize.git
-			git --git-dir $(dirname $0)/.dockerize.git --bare fetch origin '+refs/heads/*:refs/heads/*'
+			git --git-dir $(dirname $0)/.dockerize.git fetch
 			if diff <(git --git-dir $(dirname $0)/.dockerize.git show master:dockerize) $0 >/dev/null; then
+				echo "up to date"
+			else
 				git --git-dir $(dirname $0)/.dockerize.git show master:dockerize > $0
 				exec "$0" "$@"
 			fi
