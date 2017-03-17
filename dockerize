@@ -1,0 +1,70 @@
+#!/bin/bash
+# Whereever you install this as "dockerize" that is where it will create its links.
+# trampoline should be installed to the same location
+docker_tty='-i'
+[ -c /dev/fd/0 ] && docker_tty='-it'
+pinata=$(docker ps -qf name=pinata-sshd)
+test -z "$pinata" -o ! -f ~/.pinata-sshd/known_hosts && pinata-ssh-forward
+command=$(basename $0)
+container=$(readlink $0)
+trampoline=$(dirname $0)/trampoline
+container=${container:-$command}
+containerpath=$(dirname $0)/$container
+case $command in
+	with)
+		command=""
+		;;
+	dockerize)
+		if [ $# -lt 1 ]; then
+			cat <<-EOT >&2
+			Usage: dockerize <container> [<command>]...
+			       dockerize upgrade
+			if container == command then no further arguments are necessary.
+			EOT
+		fi
+		container=$1
+		if [ "$container" = "upgrade" ]; then
+			test -d $(dirname $0)/.dockerize.git || \
+			  git clone --bare git@github.com:FutureAdvisor/dockerize $(dirname $0)/.dockerize.git
+			git --git-dir $(dirname $0)/.dockerize.git fetch
+			if diff <(git --git-dir $(dirname $0)/.dockerize.git show master:dockerize) $0 >/dev/null; then
+				git --git-dir $(dirname $0)/.dockerize.git show master:dockerize > $0
+				exec "$0" "$@"
+			fi
+		else
+			shift
+			test ! -e $(dirname $0)/${container} && ln ${containerpath} $(dirname $0)/${container}
+			for cmd in "$@"; do
+				test ! -e $(dirname $0)/${cmd} && ln -s ${container} $(dirname $0)/${cmd}
+			done
+		fi
+		exit 0
+esac
+if [ ! -x "$(which realpath)" ]; then
+  echo "realpath not installed: brew install coreutils"
+  exit 1
+fi
+
+# Attempt to find a file in parent directories or the home directory.
+# we use this to locate eg. .ruby-version
+loadup() {
+  path="$(pwd)"; while [ -n "${path}" -a ! -e "${path}/$1" ]; do path="${path%/*}"; done
+  test -z "${path}" -a -e "${HOME}/$1" && path="${HOME}"
+  test -n "${path}" && echo -n "$(<${path}/$1)"
+}
+
+clean_container=${container//\//__}
+container_version="$(loadup .$(basename ${container})-version)"
+container_version="${container_version#$(basename ${container})-}"
+container_version="${container_version:-latest}"
+
+container_volumes="-v $HOME:$HOME -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts $(pinata-ssh-mount) -v ${trampoline}:/bin/trampoline:ro"
+environment=''
+test -f ${containerpath}.defaults && . ${containerpath}.defaults
+container_volumes=$(eval echo $container_volumes)
+instance=$(docker ps -qf name=${clean_container}_${container_version} | head -1)
+if [ -z "$instance" ]; then
+	cleanup=$(docker rm ${clean_container}_${container_version} 2>/dev/null)
+	instance=$(docker run -td $container_volumes $environment --name ${clean_container}_${container_version} $container:$container_version cat)
+fi
+docker exec ${docker_tty} $instance /bin/trampoline cdexec "${PWD}" $command "$@"
