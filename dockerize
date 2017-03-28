@@ -1,6 +1,15 @@
 #!/bin/bash
+# Make it easy to run development activity out of a container.
 # Whereever you install this as "dockerize" that is where it will create its links.
 # trampoline should be installed to the same location
+
+# call as get_environment_$(uname -s)
+get_environment_Darwin() {
+	local env
+	env=$(ps -wwE -p $PPID); env="${env#$(ps -ww -p $PPID)} SHLVL=.* _=.* PATH=.* PWD=.*"
+	env | grep -x -v -f <(echo ${env} | tr ' ' "\n")
+}
+
 docker_tty='-i'
 [ -c /dev/fd/0 ] && docker_tty='-it'
 pinata=$(docker ps -qf name=pinata-sshd)
@@ -14,8 +23,11 @@ containerpath=${bindir}/$container
 case $command in
 	with)
 		command=""
+		container=$1
+		shift
 		;;
 	dockerize)
+		# Usage
 		if [ $# -lt 1 ]; then
 			cat <<-EOT >&2
 			Usage: dockerize <container> [<command>]...
@@ -25,6 +37,7 @@ case $command in
 		fi
 		container=$1
 		if [ "$container" = "upgrade" ]; then
+			# Self upgrade
 			currentinode=$(ls -i ${bindir}/dockerize | cut -f1 -d' ')
 			test -d ${bindir}/.dockerize.git || \
 			  git clone --mirror git@github.com:FutureAdvisor/dockerize ${bindir}/.dockerize.git
@@ -43,6 +56,7 @@ case $command in
 				exec "$0" "$@"
 			fi
 		else
+			# Install new software
 			shift
 			test ! -e ${bindir}/${container} && ln ${containerpath} ${bindir}/${container}
 			for cmd in "$@"; do
@@ -78,4 +92,5 @@ if [ -z "$instance" ]; then
 	cleanup=$(docker rm ${clean_container}_${container_version} 2>/dev/null)
 	instance=$(docker run -td $container_volumes $environment --name ${clean_container}_${container_version} $container:$container_version cat)
 fi
-docker exec ${docker_tty} $instance /bin/trampoline cdexec "${PWD}" $command "$@"
+env=$(get_environment_$(uname -s))
+docker exec ${docker_tty} $instance /bin/execwdve ${env} "${PWD}" $command "$@"
