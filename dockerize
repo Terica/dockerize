@@ -1,7 +1,7 @@
 #!/bin/bash
 # Make it easy to run development activity out of a container.
 # Whereever you install this as "dockerize" that is where it will create its links.
-# trampoline should be installed to the same location
+# execwdve should be installed to the same location
 
 # call as get_environment_$(uname -s)
 get_environment_Darwin() {
@@ -17,7 +17,7 @@ test -z "$pinata" -o ! -f ~/.pinata-sshd/known_hosts && pinata-ssh-forward
 command=$(basename $0)
 bindir=$(dirname $0)
 container=$(readlink $0)
-trampoline=${bindir}/trampoline
+execwdve=${bindir}/execwdve
 container=${container:-$command}
 containerpath=${bindir}/$container
 case $command in
@@ -83,7 +83,7 @@ container_version="$(loadup .$(basename ${container})-version)"
 container_version="${container_version#$(basename ${container})-}"
 container_version="${container_version:-latest}"
 
-container_volumes="-v $HOME:$HOME -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts $(pinata-ssh-mount) -v ${trampoline}:/bin/trampoline:ro"
+container_volumes="-v $HOME:$HOME -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts $(pinata-ssh-mount) -v ${execwdve}:/bin/execwdve:ro"
 environment=''
 test -f ${containerpath}.defaults && . ${containerpath}.defaults
 container_volumes=$(eval echo $container_volumes)
