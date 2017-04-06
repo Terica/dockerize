@@ -3,17 +3,103 @@
 # Whereever you install this as "dockerize" that is where it will create its links.
 # execwdve should be installed to the same location
 
+usage() {
+	cat <<-EOT >&2
+	Usage: dockerize install <container> [<command>]...
+	       dockerize stop <container>
+	       dockerize upgrade
+	if container == command then no further arguments are necessary.
+	EOT
+}
+
+fail() {
+	echo "$@"
+	exit 1
+}
+
+# Attempt to find a file in parent directories or the home directory.
+# we use this to locate eg. .ruby-version
+loadup() {
+  path="$(pwd)"; while [ -n "${path}" -a ! -e "${path}/$1" ]; do path="${path%/*}"; done
+  test -z "${path}" -a -e "${HOME}/$1" && path="${HOME}"
+  test -n "${path}" && echo -n "$(<${path}/$1)"
+}
+
+if [ -x "$(which ssh-add)" ]; then
+	[[ $(ssh-add -l) =~ ^[[:digit:]]*.*\)$ ]] || fail "You must ssh-add your key to the system agent first."
+else
+	NO_SSH=1
+fi
+
 # call as get_environment_$(uname -s)
 get_environment_Darwin() {
 	local env
-	env=$(ps -wwE -p $PPID); env="${env#$(ps -ww -p $PPID)} SHLVL=.* _=.* PATH=.* PWD=.*"
-	env | grep -x -v -f <(echo ${env} | tr ' ' "\n")
+	env=$(ps Eww -o command $PPID); env=${env#$(ps ww -o command $PPID) }; env="$(sed 's/ \([^ ][^ ]*=\)/\'$'\n''\1/g' <<< "$env")
+SHLVL=.*
+_=.*
+PATH=.*
+PWD=.*"
+	env | grep -x -v -f <(echo "${env}") | sed "s/.*/'&'/"
+}
+
+get_environment_Linux() {
+	local env
+	local ppid
+	ppid=$PPID
+	test "$ppid" -eq 0 && ppid=1
+	env="$(cat /proc/$ppid/environ | tr "\0" "\n")
+SHLVL=.*
+_=.*
+PATH=.*
+PWD=.*"
+	env | grep -x -v -f <(echo "${env}") | sed 's/.*/"&"/' 
+}
+
+pinata_location() {
+	local sock
+	sock=$(<~/.pinata-sshd/agent_socket_path)
+	sock=${sock//\/tmp/${HOME}\/.pinata-sshd}
+	echo "-v ${sock}:/tmp/ssh-agent.sock -e SSH_AUTH_SOCK=/tmp/ssh-agent.sock -e PINATA_SOCK=${sock}"
 }
 
 docker_tty='-i'
 [ -c /dev/fd/0 ] && docker_tty='-it'
-pinata=$(docker ps -qf name=pinata-sshd)
-test -z "$pinata" -o ! -f ~/.pinata-sshd/known_hosts && pinata-ssh-forward
+
+pinata_mount_Linux() {
+	if [ -n $PINATA_SOCK ]; then
+		pinata="-v $PINATA_SOCK:$SSH_AUTH_SOCK -e PINATA_SOCK -e SSH_AUTH_SOCK" 
+	else
+		if [ -n $SSH_AUTH_SOCK ]; then
+			pinata="-v $SSH_AUTH_SOCK:$SSH_AUTH_SOCK -e SSH_AUTH_SOCK"
+		else
+			pinata=""
+		fi
+	fi
+	echo "$pinata"
+}
+
+pinata_mount_Darwin() {
+	pinata=$(docker ps -qf name=pinata-sshd)
+	# try to resolve pinata-ssh automatically
+	if [ -z "$pinata" -o ! -f ~/.pinata-sshd/known_hosts ]; then
+		pinata-ssh-forward 1>&2
+		pinata=$(docker ps -qf name=pinata-sshd)
+		if [ -z "$pinata" -o ! -f ~/.pinata-sshd/known_hosts ]; then
+			echo "running without pinata-ssh-forwarding. github requests may fail:" >&2
+			echo "$result" >&2
+			pinata=""
+		else
+			# Manage race condition between pinata-ssh-forward and pinata-ssh-mount
+			echo "waiting for pinata to finish setting up" >&2
+			while [ ! -e ~/.pinata-sshd/agent_socket_path ]; do sleep 1; done
+			pinata="$(pinata_location)"
+		fi
+	else
+		pinata="$(pinata_location)"
+	fi
+	echo "$pinata"
+}
+
 command=$(basename $0)
 bindir=$(dirname $0)
 container=$(readlink $0)
@@ -28,15 +114,22 @@ case $command in
 		;;
 	dockerize)
 		# Usage
-		if [ $# -lt 1 ]; then
-			cat <<-EOT >&2
-			Usage: dockerize <container> [<command>]...
-			       dockerize upgrade
-			if container == command then no further arguments are necessary.
-			EOT
-		fi
-		container=$1
-		if [ "$container" = "upgrade" ]; then
+		[ $# -lt 1 ] && usage
+		cmd=$1
+		case "$cmd" in
+		stop)
+			[ $# -lt 2 ] && usage
+			command=""
+			container=$2
+			clean_container=${container//\//__}
+			container_version="$(loadup .$(basename ${container})-version)"
+			container_version="${container_version#$(basename ${container})-}"
+			container_version="${container_version:-latest}"
+			instance=$(docker ps -qf name=${clean_container}_${container_version} | head -1)
+			test -z "$instance" || ( docker stop $instance; docker rm $instance ) | head -1
+			exit 0
+			;;
+		upgrade)
 			# Self upgrade
 			currentinode=$(ls -i ${bindir}/dockerize | cut -f1 -d' ')
 			test -d ${bindir}/.dockerize.git || \
@@ -55,42 +148,39 @@ case $command in
 				fi
 				exec "$0" "$@"
 			fi
-		else
+			;;
+		install)
 			# Install new software
-			shift
+			[ $# -lt 2 ] && usage
+			container=$2
+			shift 2
 			test ! -e ${bindir}/${container} && ln ${containerpath} ${bindir}/${container}
 			for cmd in "$@"; do
 				test ! -e ${bindir}/${cmd} && ln -s ${container} ${bindir}/${cmd}
 			done
-		fi
+			;;
+		*)
+			usage
+		esac
 		exit 0
 esac
-if [ ! -x "$(which realpath)" ]; then
-  echo "realpath not installed: brew install coreutils"
-  exit 1
-fi
-
-# Attempt to find a file in parent directories or the home directory.
-# we use this to locate eg. .ruby-version
-loadup() {
-  path="$(pwd)"; while [ -n "${path}" -a ! -e "${path}/$1" ]; do path="${path%/*}"; done
-  test -z "${path}" -a -e "${HOME}/$1" && path="${HOME}"
-  test -n "${path}" && echo -n "$(<${path}/$1)"
-}
+test -x "$(which realpath)" || fail "realpath not installed: brew install coreutils"
 
 clean_container=${container//\//__}
 container_version="$(loadup .$(basename ${container})-version)"
 container_version="${container_version#$(basename ${container})-}"
 container_version="${container_version:-latest}"
 
-container_volumes="-v $HOME:$HOME -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts $(pinata-ssh-mount) -v ${execwdve}:/bin/execwdve:ro"
+container_volumes="-v $HOME:$HOME -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts -v ${execwdve}:/bin/execwdve:ro"
 environment=''
 test -f ${containerpath}.defaults && . ${containerpath}.defaults
-container_volumes=$(eval echo $container_volumes)
+container_volumes=$(eval echo "$container_volumes")
 instance=$(docker ps -qf name=${clean_container}_${container_version} | head -1)
 if [ -z "$instance" ]; then
+	container_volumes="$(pinata_mount_$(uname -s)) $container_volumes"
 	cleanup=$(docker rm ${clean_container}_${container_version} 2>/dev/null)
 	instance=$(docker run -td $container_volumes $environment --name ${clean_container}_${container_version} $container:$container_version cat)
 fi
 env=$(get_environment_$(uname -s))
-docker exec ${docker_tty} $instance /bin/execwdve ${env} "${PWD}" $command "$@"
+# echo docker exec ${docker_tty} $instance /bin/execwdve ${env} "${PWD}" $command "$@"
+eval exec docker exec ${docker_tty} $instance /bin/execwdve ${env} "${PWD}" $command "$@"
