@@ -17,19 +17,18 @@ fail() {
 	exit 1
 }
 
+home=${home:-$USERPROFILE}
+home=${home:-$HOME}
+
 # Attempt to find a file in parent directories or the home directory.
 # we use this to locate eg. .ruby-version
 loadup() {
   path="$(pwd)"; while [ -n "${path}" -a ! -e "${path}/$1" ]; do path="${path%/*}"; done
-  test -z "${path}" -a -e "${HOME}/$1" && path="${HOME}"
+  test -z "${path}" -a -e "${home}/$1" && path="${home}"
   test -n "${path}" && echo -n "$(<${path}/$1)"
 }
 
-if [ -x "$(which ssh-add)" ]; then
-	[[ $(ssh-add -l) =~ ^[[:digit:]]*.*\)$ ]] || fail "You must ssh-add your key to the system agent first."
-else
-	NO_SSH=1
-fi
+[[ $(ssh-add -l) =~ ^[[:digit:]]*.*\)$ ]] || fail "You must ssh-add your key to the system agent first."
 
 # call as get_environment_$(uname -s)
 get_environment_Darwin() {
@@ -38,8 +37,12 @@ get_environment_Darwin() {
 SHLVL=.*
 _=.*
 PATH=.*
+DOCKER_HOST=.*
+SSH_AUTH_SOCK=.*
+SSH_AGENT_PID=.*
+LS_COLORS=.*
 PWD=.*"
-	env | grep -x -v -f <(echo "${env}") | sed "s/.*/'&'/"
+	env | grep -x -v -f <(echo "${env}")
 }
 
 get_environment_Linux() {
@@ -51,8 +54,12 @@ get_environment_Linux() {
 SHLVL=.*
 _=.*
 PATH=.*
+DOCKER_HOST=.*
+SSH_AUTH_SOCK=.*
+SSH_AGENT_PID=.*
+LS_COLORS=.*
 PWD=.*"
-	env | grep -x -v -f <(echo "${env}") | sed 's/.*/"&"/' 
+	env | grep -x -v -f <(echo "${env}") 
 }
 
 pinata_location() {
@@ -69,11 +76,7 @@ pinata_mount_Linux() {
 	if [ -n $PINATA_SOCK ]; then
 		pinata="-v $PINATA_SOCK:$SSH_AUTH_SOCK -e PINATA_SOCK -e SSH_AUTH_SOCK" 
 	else
-		if [ -n $SSH_AUTH_SOCK ]; then
-			pinata="-v $SSH_AUTH_SOCK:$SSH_AUTH_SOCK -e SSH_AUTH_SOCK"
-		else
-			pinata=""
-		fi
+		pinata="-v $SSH_AUTH_SOCK:$SSH_AUTH_SOCK -e SSH_AUTH_SOCK"
 	fi
 	echo "$pinata"
 }
@@ -103,7 +106,11 @@ pinata_mount_Darwin() {
 command=$(basename $0)
 bindir=$(dirname $0)
 container=$(readlink $0)
-execwdve=${bindir}/execwdve
+if [ -n "$USERPROFILE" ]; then
+  execwdve=${USERPROFILE}/bin/execwdve
+else
+  execwdve=${bindir}/execwdve
+fi
 container=${container:-$command}
 containerpath=${bindir}/$container
 case $command in
@@ -171,7 +178,7 @@ container_version="$(loadup .$(basename ${container})-version)"
 container_version="${container_version#$(basename ${container})-}"
 container_version="${container_version:-latest}"
 
-container_volumes="-v $HOME:$HOME -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts -v ${execwdve}:/bin/execwdve:ro"
+container_volumes="-v $home:$home -v ~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts -v ${execwdve}:/bin/execwdve:ro"
 environment=''
 test -f ${containerpath}.defaults && . ${containerpath}.defaults
 container_volumes=$(eval echo "$container_volumes")
@@ -181,6 +188,6 @@ if [ -z "$instance" ]; then
 	cleanup=$(docker rm ${clean_container}_${container_version} 2>/dev/null)
 	instance=$(docker run -td $container_volumes $environment --name ${clean_container}_${container_version} $container:$container_version cat)
 fi
-env=$(get_environment_$(uname -s))
-# echo docker exec ${docker_tty} $instance /bin/execwdve ${env} "${PWD}" $command "$@"
-eval exec docker exec ${docker_tty} $instance /bin/execwdve ${env} "${PWD}" $command "$@"
+# Use \n as the delimiter to process array items
+IFS=$'\n' env=($(get_environment_$(uname -s)))
+exec docker exec ${docker_tty} $instance /bin/execwdve "${env[@]}" "${PWD}" $command "$@"
