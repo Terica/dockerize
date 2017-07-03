@@ -17,8 +17,16 @@ fail() {
 	exit 1
 }
 
-home=${home:-$USERPROFILE}
-home=${home:-$HOME}
+home=$HOME
+os=$(uname -s)
+pwd=${PWD}
+execwdve=${bindir}/execwdve
+if [ -n "$USERPROFILE" ]; then
+  execwdve=${USERPROFILE}/bin/execwdve
+  pwd=${PWD/\/mnt/}
+  os=Windows
+  home=$USERPROFILE
+fi
 
 # Attempt to find a file in parent directories or the home directory.
 # we use this to locate eg. .ruby-version
@@ -50,7 +58,7 @@ get_environment_Linux() {
 	local ppid
 	ppid=$PPID
 	test "$ppid" -eq 0 && ppid=1
-	env="$(cat /proc/$ppid/environ | tr "\0" "\n")
+	env="$(cat /proc/$ppid/environ 2>/dev/null | tr "\0" "\n")
 SHLVL=.*
 _=.*
 PATH=.*
@@ -62,10 +70,13 @@ PWD=.*"
 	env | grep -x -v -f <(echo "${env}") 
 }
 
+get_environment_Windows() {
+  get_environment_Linux
+}
+
 pinata_location() {
 	local sock
 	sock=$(<~/.pinata-sshd/agent_socket_path)
-	sock=${sock//\/tmp/${HOME}\/.pinata-sshd}
 	echo "-v ${sock}:/tmp/ssh-agent.sock -e SSH_AUTH_SOCK=/tmp/ssh-agent.sock -e PINATA_SOCK=${sock}"
 }
 
@@ -73,7 +84,7 @@ docker_tty='-i'
 [ -c /dev/fd/0 ] && docker_tty='-it'
 
 pinata_mount_Linux() {
-	if [ -n $PINATA_SOCK ]; then
+	if [ -n "$PINATA_SOCK" ]; then
 		pinata="-v $PINATA_SOCK:$SSH_AUTH_SOCK -e PINATA_SOCK -e SSH_AUTH_SOCK" 
 	else
 		pinata="-v $SSH_AUTH_SOCK:$SSH_AUTH_SOCK -e SSH_AUTH_SOCK"
@@ -94,7 +105,7 @@ pinata_mount_Darwin() {
 		else
 			# Manage race condition between pinata-ssh-forward and pinata-ssh-mount
 			echo "waiting for pinata to finish setting up" >&2
-			while [ ! -e ~/.pinata-sshd/agent_socket_path ]; do sleep 1; done
+			while [ ! -e ~/.pinata-sshd/agent_socket_path ]; do sleep 0.1; done
 			pinata="$(pinata_location)"
 		fi
 	else
@@ -103,14 +114,13 @@ pinata_mount_Darwin() {
 	echo "$pinata"
 }
 
+pinata_mount_Windows() {
+  pinata_mount_Darwin
+}
+
 command=$(basename $0)
 bindir=$(dirname $0)
 container=$(readlink $0)
-if [ -n "$USERPROFILE" ]; then
-  execwdve=${USERPROFILE}/bin/execwdve
-else
-  execwdve=${bindir}/execwdve
-fi
 container=${container:-$command}
 containerpath=${bindir}/$container
 case $command in
@@ -184,10 +194,10 @@ test -f ${containerpath}.defaults && . ${containerpath}.defaults
 container_volumes=$(eval echo "$container_volumes")
 instance=$(docker ps -qf name=${clean_container}_${container_version} | head -1)
 if [ -z "$instance" ]; then
-	container_volumes="$(pinata_mount_$(uname -s)) $container_volumes"
+	container_volumes="$(pinata_mount_$os) $container_volumes"
 	cleanup=$(docker rm ${clean_container}_${container_version} 2>/dev/null)
 	instance=$(docker run -td $container_volumes $environment --name ${clean_container}_${container_version} $container:$container_version cat)
 fi
 # Use \n as the delimiter to process array items
-IFS=$'\n' env=($(get_environment_$(uname -s)))
-exec docker exec ${docker_tty} $instance /bin/execwdve "${env[@]}" "${PWD}" $command "$@"
+IFS=$'\n' env=($(get_environment_$os))
+exec docker exec ${docker_tty} $instance /bin/execwdve "${env[@]}" "${pwd}" $command "$@"
