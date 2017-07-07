@@ -1,0 +1,21 @@
+#!/bin/bash
+cmd=()
+stripmount=0
+for arg in "$@"; do
+  if [ "$stripmount" -eq 1 ]; then
+    new="${arg//\/mnt/}"
+    if [ "$new" = "$arg" ]; then
+      arg="/$arg"
+    else
+      arg="$new"
+    fi
+    stripmount=0
+  fi
+  case "$arg" in
+    -v|-w)
+        stripmount=1
+	;;
+  esac
+  cmd+=("$arg")
+done
+exec /usr/bin/docker "${cmd[@]}"
