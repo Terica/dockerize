@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 	"syscall"
 )
 
@@ -22,10 +25,19 @@ import (
 	the Linux filesystem, which only WSL can see, so on Windows
 	we need to use the USERPROFILE directory.
 */
+
+// This will generate us a jsonfiles.go with our dockerize_json inside
+//go:generate go run scripts/includeconfig.go
+
+var (
+	goos = runtime.GOOS
+	ReadFile = ioutil.ReadFile
+)
+
 func osdetect() string {
-	theos := runtime.GOOS
+	theos := goos
 	if theos == "linux" {
-		if text, err := ioutil.ReadFile("/proc/sys/kernel/osrelease"); err == nil && strings.Contains(string(text), "Microsoft") {
+		if text, err := ReadFile("/proc/sys/kernel/osrelease"); err == nil && strings.Contains(string(text), "Microsoft") {
 			theos = "linux/windows"
 		}
 	}
@@ -85,6 +97,7 @@ type Containers struct {
 
 type ContainerOptions struct {
 	Commands []string `json:"commands"`
+	Volumes []string `json:"volumes"`
 }
 
 type ContainerMap map[string]ContainerOptions
@@ -92,14 +105,23 @@ type ContainerMap map[string]ContainerOptions
 /*
 	Reads a configuration file from "name" and outputs a map of commands to containers
 */
-func readConfig(name string) *map[string]*string {
+func readConfig(name string) (Containers, map[string]*string) {
 	containers := []string{}
 	commands := map[string]*string{}
 	config := Containers{}
-	if err := json.Unmarshal([]byte(name), &config); err != nil {
-		config_bytes, _ := ioutil.ReadFile(name)
-		// if I didn't need the command index, we'd be done by now
-		json.Unmarshal(config_bytes, &config)
+	var config_bytes []byte
+	if bytes, err := ioutil.ReadFile(name); err == nil {
+		config_bytes = bytes
+	} else {
+		config_bytes = make([]byte,len(dockerize_json))
+		copy(config_bytes, dockerize_json)
+	}
+	// I like comments, but the JSON parser doesn't
+	re := regexp.MustCompile("(?m)//.*$")
+	config_bytes = re.ReplaceAllLiteral(config_bytes, []byte{})
+	if err := json.Unmarshal(config_bytes, &config); err != nil {
+		fmt.Printf("unable to read configuration: %s\n", err)
+		os.Exit(1)
 	}
 	for ctr, cmds := range config.Container {
 		// fmt.Printf("%d %s\n", len(containers), ctr)
@@ -110,19 +132,29 @@ func readConfig(name string) *map[string]*string {
 			// fmt.Printf("\t%s->%s\n", cmd, *commands[cmd])
 		}
 	}
-	return &commands
+	return config, commands
 }
 
 func homeDir() string {
-	if home, present := os.LookupEnv("USERPROFILE"); present {
+	switch osdetect() {
+	case "windows":
+		home, _ := os.LookupEnv("USERPROFILE")
+		home = strings.Replace(home, "\\", "/", -1)
+		home = strings.Replace(home, ":", "",1)
+		r, n := utf8.DecodeRuneInString(home)
+		home = string(unicode.ToLower(r)) + home[n:]
+		home = "/" + home
 		return home
-	} else {
+	case "linux/windows":
+		home, _ := os.LookupEnv("USERPROFILE")
+		return home
+	default:
 		home, _ := os.LookupEnv("HOME")
 		return home
 	}
 }
 
-func loadup(file string) string {
+func search(file string) (string, bool) {
 	path, _ := os.Getwd()
 	for path[len(path)-1] != os.PathSeparator {
 		if _, err := os.Stat(path + string(os.PathSeparator) + file); !os.IsNotExist(err) {
@@ -139,7 +171,14 @@ func loadup(file string) string {
 	}
 	// fmt.Println(path)
 	if path[len(path)-1] != os.PathSeparator {
-		content, _ := ioutil.ReadFile(path + string(os.PathSeparator) + file)
+		return path + string(os.PathSeparator) + file, true
+	}
+	return "", false
+}
+
+func loadup(file string) string {
+	if path, found := search(file); found {
+		content, _ := ioutil.ReadFile(path)
 		return strings.TrimRight(string(content), " \t\r\n")
 	}
 	return ""
@@ -238,16 +277,30 @@ func doWith() {}
 func runCommand(command string) {
 	var remove []string
 	absSelf := "/tmp/dockerize"
-	if osdetect() == "windows" {
+	theos := osdetect()
+	pwd, _ := os.Getwd()
+	if theos == "windows" {
 		remove = winExclude
+		pwd = strings.Replace(pwd, "\\", "/", -1)
+		pwd = strings.Replace(pwd, ":", "",1)
+		r, n := utf8.DecodeRuneInString(pwd)
+		pwd = string(unicode.ToLower(r)) + pwd[n:]
+		pwd = "/" + pwd
 	} else {
 		remove = nixExclude
+		if strings.Contains(theos,"windows") {
+			pwd = strings.TrimPrefix(pwd,"/mnt")
+		}
 	}
 	env := exclude(os.Environ(), hashify(remove))
-	commands := readConfig(loadup("dockerize.json"))
-	containername := *(*commands)[command]
+	var (
+		config Containers
+		commands map[string]*string
+	)
+	path, _ := search("dockerize.json")
+	config, commands = readConfig(path)
+	containername := *commands[command]
 	cleanContainername := strings.Replace(containername, "/", "__", -1)
-	fmt.Printf("run command '%s' from container '%s'\n", command, containername)
 	versionfile := fmt.Sprintf(".%s-version", containername)
 	prefix := containername + "-"
 	containerversion := loadup(versionfile)
@@ -257,15 +310,28 @@ func runCommand(command string) {
 	if containerversion == "" {
 		containerversion = "latest"
 	}
+	os.Setenv("container_version", containerversion)
 	instanceName := cleanContainername + "_" + containerversion
 	cmdOutput, _ := exec.Command("docker", "ps", "-qf", "name="+instanceName).Output()
-	instance := head(string(cmdOutput))
-	containerVolumes := []string{"-v", homeDir() + ":" + homeDir(),
-		"-v", "~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts",
-		"-v", absSelf + ":/bin/execwdve:ro"}
-	fmt.Printf("search for instance: '%s' returned: '%s'\n", instanceName, instance)
-	fmt.Printf("mounts: %s\n", strings.Join(containerVolumes, " "))
-	fmt.Printf("environment: \"%s\"\n", strings.Join(env, "\" \""))
+	var instance string
+	if instance = head(string(cmdOutput)); instance == "" {
+		containerVolumes := []string{"-v", homeDir() + ":" + homeDir(),
+			"-v", "~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts",
+			"-v", absSelf + ":/bin/execwdve:ro"}
+		for _, volume := range config.Container[containername].Volumes {
+			expanded := os.ExpandEnv(volume)
+			containerVolumes = append(containerVolumes, "-v", expanded)
+		}
+		fmt.Printf("mounts: %s\n", strings.Join(containerVolumes, " "))
+	}
+	args := append([]string{"exec","-it", instance, "/bin/execwdve"}, env...)
+	args = append(args, pwd, command)
+	args = append(args, os.Args[1:]...)
+	cmd := exec.Command("docker", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 
 }
 
@@ -273,6 +339,7 @@ func runCommand(command string) {
 	Command processing is fun
 	dockerize install <location> (all known symlinks) to $0
 	dockerize init (copy itself into docker host /tmp)
+	dockerize write config
 	dockerize upgrade (I think that can go away)
 	with container command (very useful)
 	command ...
@@ -283,6 +350,7 @@ func main() {
 	if osdetect() == "windows" {
 		basename = strings.TrimSuffix(basename, ".exe")
 	}
+	os.Setenv("HOME", homeDir())
 	switch basename {
 	case "execwdve":
 		execwdve()

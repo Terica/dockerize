@@ -1,10 +1,28 @@
 {
+  // Comments are stripped from this file before parsing as JSON
   "containers" : {
     "ruby" : {
       "commands" : [
         "bundle",
         "ruby",
         "irb"
+      ],
+      "volumes" : [
+        // Store bundles separately by ruby version
+        "$HOME/.local/ruby/${container_version}/bundle:/usr/local/bundle"
+      ]
+    },
+    "python" : {
+      "commands" :[
+        "python3",
+        "pip3",
+        "python",
+        "pip",
+        "easy_install"
+      ],
+      "volumes" :[
+        // pip --user installs go here.
+        "$HOME/.local/python/${container_version}:/root/.local"
       ]
     },
     "golang" : {
