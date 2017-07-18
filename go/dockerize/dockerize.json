@@ -1,5 +1,14 @@
 {
   // Comments are stripped from this file before parsing as JSON
+  "portability" : {
+    "linux/windows" : {
+      "path_regex" : [ "s#^/mnt##" ]
+    },
+    "windows" : {
+      "path_regex" : [ "s#^([A-Za-z]):#/\1#", "s#\\#/#g" ],
+      "executable_regex" : [ "s/.exe$//" ]
+    }
+  }
   "containers" : {
     "ruby" : {
       "commands" : [
@@ -27,7 +36,12 @@
     },
     "golang" : {
       "commands" : [
-        "go"
+        "go",
+        "godoc",
+        "gofmt",
+        "golint",
+        "gopkgs",
+        "goreturns"
       ]
     }
   }
