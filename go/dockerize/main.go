@@ -278,7 +278,21 @@ func copySelfToTemp() {
 	}
 }
 
-func installSymlinks() {}
+func installSymlinks() {
+	self,_ := os.Executable()
+	dir := filepath.Dir(self)
+	path, _ := search("dockerize.json")
+	_, commands := readConfig(path)
+	for cmd := range commands {
+		if osdetect() == "windows" {
+			cmd += ".exe"
+		}
+		cmd = filepath.Join(dir,cmd)
+		os.Remove(cmd)
+		os.Link(self, cmd)
+	}
+	
+}
 
 const dockerizeUsageString = "dockerize init - setup docker for using dockerize\n" +
 	"dockerize install <path> - install symlinks to known programs to path\n" +
