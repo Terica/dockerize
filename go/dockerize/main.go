@@ -2,6 +2,7 @@ package main
 
 import (
 	"dockerize/impl"
+	"dockerize/utils"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,8 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
-	"unicode"
-	"unicode/utf8"
 )
 
 /*
@@ -91,6 +90,10 @@ var (
 		"PUBLIC", "SESSIONNAME", "SystemDrive", "SystemRoot", "TEMP", "TMP", "USERDOMAIN",
 		"USERDOMAIN_ROAMINGPROFILE", "USERNAME", "USERPROFILE", "VS110COMNTOOLS",
 		"VS120COMNTOOLS", "VS140COMNTOOLS", "windir"}
+	port     TranslationOptions
+	config   Config
+	commands CommandMap
+	theos    = osdetect()
 )
 
 /*
@@ -108,7 +111,8 @@ var (
 // Currently the only top level member is a map:
 // containers.
 type Config struct {
-	Containers ContainerMap `json:"containers"`
+	Containers  ContainerMap `json:"containers"`
+	Portability OSMap        `json:"portability"`
 }
 
 // ContainerOptions is a structure to store the
@@ -118,8 +122,18 @@ type ContainerOptions struct {
 	Volumes  []string `json:"volumes"`
 }
 
+// TranslationOptions is a structure to store translations for OS specifics
+type TranslationOptions struct {
+	Home             string              `json:"home"`
+	PathRegex        []map[string]string `json:"path_regex"`
+	ExecutableSuffix string              `json:"executable_suffix"`
+}
+
 // ContainerMap is a simple map indexed by container name
 type ContainerMap map[string]ContainerOptions
+
+// OSMap is a simple map indexed by OS Match
+type OSMap map[string]TranslationOptions
 
 // CommandMap is a simple map used to reverse index the containers by command
 type CommandMap map[string]*string
@@ -128,9 +142,9 @@ type CommandMap map[string]*string
 	readConfig reads a configuration file from "name" and outputs
 	a CommandMap
 */
-func readConfig(name string) (Config, CommandMap) {
-	commands := CommandMap{}
-	config := Config{}
+func readConfig(name string) {
+	commands = CommandMap{}
+	config = Config{}
 	var configBytes []byte
 	if bytes, err := ioutil.ReadFile(name); err == nil {
 		configBytes = bytes
@@ -139,7 +153,7 @@ func readConfig(name string) (Config, CommandMap) {
 		copy(configBytes, dockerizeJSON)
 	}
 	// I like comments, but the JSON parser doesn't
-	re := regexp.MustCompile("(?m)//.*$")
+	re := regexp.MustCompile("(?m)^\\s*//.*$")
 	configBytes = re.ReplaceAllLiteral(configBytes, []byte{})
 	if err := json.Unmarshal(configBytes, &config); err != nil {
 		fmt.Printf("unable to read configuration: %s\n", err)
@@ -151,60 +165,6 @@ func readConfig(name string) (Config, CommandMap) {
 			// fmt.Printf("\t%s->%s\n", cmd, *commands[cmd])
 		}
 	}
-	return config, commands
-}
-
-func pathWindowsToUnix(path string) string {
-	output := path
-	output = strings.Replace(output, "\\", "/", -1)
-	output = strings.Replace(output, ":", "", 1)
-	r, n := utf8.DecodeRuneInString(output)
-	output = string(unicode.ToLower(r)) + output[n:]
-	return "/" + output
-}
-
-func homeDir() string {
-	switch osdetect() {
-	case "windows":
-		home, _ := runner.LookupEnv("USERPROFILE")
-		return pathWindowsToUnix(home)
-	case "linux/windows":
-		home, _ := runner.LookupEnv("USERPROFILE")
-		return home
-	default:
-		home, _ := runner.LookupEnv("HOME")
-		return home
-	}
-}
-
-func search(file string) (string, bool) {
-	path, _ := os.Getwd()
-	for path[len(path)-1] != os.PathSeparator {
-		if _, err := os.Stat(filepath.Join(path, file)); !os.IsNotExist(err) {
-			break
-		}
-		// fmt.Println(path)
-		path = filepath.Dir(path)
-	}
-	if path[len(path)-1] == os.PathSeparator {
-		dir := filepath.Join(homeDir(), file)
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			path = homeDir()
-		}
-	}
-	// fmt.Println(path)
-	if path[len(path)-1] != os.PathSeparator {
-		return filepath.Join(path, file), true
-	}
-	return "", false
-}
-
-func loadup(file string) string {
-	if path, found := search(file); found {
-		content, _ := ioutil.ReadFile(path)
-		return strings.TrimRight(string(content), " \t\r\n")
-	}
-	return ""
 }
 
 func execwdve() {
@@ -279,19 +239,17 @@ func copySelfToTemp() {
 }
 
 func installSymlinks() {
-	self,_ := os.Executable()
+	self, _ := os.Executable()
 	dir := filepath.Dir(self)
-	path, _ := search("dockerize.json")
-	_, commands := readConfig(path)
 	for cmd := range commands {
 		if osdetect() == "windows" {
 			cmd += ".exe"
 		}
-		cmd = filepath.Join(dir,cmd)
+		cmd = filepath.Join(dir, cmd)
 		os.Remove(cmd)
 		os.Link(self, cmd)
 	}
-	
+
 }
 
 const dockerizeUsageString = "dockerize init - setup docker for using dockerize\n" +
@@ -311,37 +269,50 @@ func dockerize() {
 	}
 }
 
+// ConvertPath is a helper function for applying regular expressions
+func ConvertPath(path string) string {
+	return utils.ProcessRegexMapList(path, port.PathRegex)
+}
+
+func processPortability() {
+	port = config.Portability["default"]
+	over := config.Portability[theos]
+	if over.Home != "" {
+		port.Home = over.Home
+	}
+	if over.PathRegex != nil {
+		port.PathRegex = over.PathRegex
+	}
+	if over.ExecutableSuffix != "" {
+		port.ExecutableSuffix = over.ExecutableSuffix
+	}
+	port.Home, _ = os.LookupEnv(port.Home)
+}
+
 func doWith() {}
 func runCommand(command string) {
-	var remove []string
+	var (
+		remove           []string
+		containerversion string
+	)
 	absSelf := "/tmp/dockerize"
-	theos := osdetect()
 	pwd, _ := os.Getwd()
+	pwd = ConvertPath(pwd)
+	fmt.Printf("pwd: %s, cmd: %s\n", pwd, command)
+
 	if theos == "windows" {
 		remove = winExclude
-		pwd = strings.Replace(pwd, "\\", "/", -1)
-		pwd = strings.Replace(pwd, ":", "", 1)
-		r, n := utf8.DecodeRuneInString(pwd)
-		pwd = string(unicode.ToLower(r)) + pwd[n:]
-		pwd = "/" + pwd
 	} else {
 		remove = nixExclude
-		if strings.Contains(theos, "windows") {
-			pwd = strings.TrimPrefix(pwd, "/mnt")
-		}
 	}
 	env := exclude(os.Environ(), hashify(remove))
-	var (
-		config   Config
-		commands CommandMap
-	)
-	path, _ := search("dockerize.json")
-	config, commands = readConfig(path)
 	containername := *commands[command]
 	cleanContainername := strings.Replace(containername, "/", "__", -1)
 	versionfile := fmt.Sprintf(".%s-version", containername)
 	prefix := containername + "-"
-	containerversion := loadup(versionfile)
+	if versionfile, found := utils.FindFile(versionfile, ".", port.Home); found {
+		containerversion = utils.ReadTrimmedFile(versionfile)
+	}
 	if len(containerversion) > len(prefix) && containerversion[0:len(prefix)] == prefix {
 		containerversion = containerversion[len(prefix):]
 	}
@@ -353,7 +324,7 @@ func runCommand(command string) {
 	cmdOutput, _ := exec.Command("docker", "ps", "-qf", "name="+instanceName).Output()
 	var instance string
 	if instance = head(string(cmdOutput)); instance == "" {
-		containerVolumes := []string{"-v", homeDir() + ":" + homeDir(),
+		containerVolumes := []string{"-v", ConvertPath(port.Home) + ":" + ConvertPath(port.Home),
 			"-v", "~/.ssh/known_hosts:/etc/ssh/ssh_known_hosts",
 			"-v", absSelf + ":/bin/execwdve:ro"}
 		for _, volume := range config.Containers[containername].Volumes {
@@ -384,11 +355,13 @@ func runCommand(command string) {
 */
 
 func main() {
-	basename := filepath.Base(os.Args[0])
-	if osdetect() == "windows" {
-		basename = strings.TrimSuffix(basename, ".exe")
+	basename, _ := os.Executable()
+	if configPath, _ := utils.FindFile("dockerize.json", filepath.Dir(basename), "."); true {
+		readConfig(configPath)
+		processPortability()
 	}
-	os.Setenv("HOME", homeDir())
+	basename = filepath.Base(basename)
+	basename = strings.TrimSuffix(basename, port.ExecutableSuffix)
 	switch basename {
 	case "execwdve":
 		execwdve()

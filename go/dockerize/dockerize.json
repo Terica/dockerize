@@ -1,14 +1,25 @@
 {
   // Comments are stripped from this file before parsing as JSON
   "portability" : {
+    "default" : {
+      "home" : "HOME"
+    },
     "linux/windows" : {
-      "path_regex" : [ "s#^/mnt##" ]
+      "home" : "USERPROFILE",
+      "path_regex" : [ {"from":"^/mnt"} ]
     },
     "windows" : {
-      "path_regex" : [ "s#^([A-Za-z]):#/\1#", "s#\\#/#g" ],
-      "executable_regex" : [ "s/.exe$//" ]
+      "home" : "USERPROFILE",
+      "path_regex" : [
+        { "from" : "^([A-Za-z]):", 
+          "to" : "/$1",
+          "flags" : "lower" },
+        { "from": "\\",
+          "to": "/",
+          "flags": "all" }],
+      "executable_suffix" : ".exe"
     }
-  }
+  },
   "containers" : {
     "ruby" : {
       "commands" : [
@@ -37,11 +48,18 @@
     "golang" : {
       "commands" : [
         "go",
+      	"go-outline",
+      	"go-symbols",
+       	"gocode",
+      	"godef",
         "godoc",
         "gofmt",
         "golint",
+      	"gomodifytags",
         "gopkgs",
-        "goreturns"
+      	"gorename",
+        "goreturns",
+      	"guru"
       ]
     }
   }
