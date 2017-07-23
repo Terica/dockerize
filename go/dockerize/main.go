@@ -360,7 +360,7 @@ func main() {
 		readConfig(configPath)
 		processPortability()
 	}
-	basename = filepath.Base(basename)
+	basename = filepath.Base(os.Args[0])
 	basename = strings.TrimSuffix(basename, port.ExecutableSuffix)
 	switch basename {
 	case "execwdve":
