@@ -1,0 +1,4 @@
+# Generated
+go/dockerize/jsonfiles.go
+*.exe
+dockerize
