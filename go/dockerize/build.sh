@@ -1,6 +1,7 @@
 #!/bin/bash
 
 test dockerize.json -nt jsonfiles.go && GOOS=linux go generate
+rm -f dockerize dockerize.linux dockerize.darwin dockerize.exe
 GOOS=linux go build
 mv dockerize dockerize.linux
 GOOS=windows go build
