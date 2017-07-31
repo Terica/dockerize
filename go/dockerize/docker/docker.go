@@ -4,8 +4,10 @@ package docker
 import (
 	"context"
 	"dockerize/utils"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 
@@ -89,6 +91,18 @@ func (c Container) IsRunning() (bool, error) {
 	return false, nil
 }
 
+// Event structure defines the JSON messages sent during a pull
+type Event struct {
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Error          string `json:"error"`
+	Progress       string `json:"progress"`
+	ProgressDetail struct {
+		Current int `json:"current"`
+		Total   int `json:"total"`
+	} `json:"progressDetail"`
+}
+
 // Run a container with some mounts
 func (c Container) Run() (string, error) {
 	running, err := c.IsRunning()
@@ -101,7 +115,16 @@ func (c Container) Run() (string, error) {
 	}
 	fullImage := c.Image + ":" + c.getTag()
 	if out, err := Client.ImagePull(context.Background(), fullImage, types.ImagePullOptions{}); err == nil {
-		io.Copy(os.Stdout, out)
+		dec := json.NewDecoder(out)
+		for {
+			var m Event
+			if err := dec.Decode(&m); err == io.EOF {
+				break
+			} else if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("%s:%s\n", m.ID, m.Status)
+		}
 	} else {
 		fmt.Printf("error while pulling image:%s\n", err)
 	}
