@@ -11,11 +11,9 @@ func mockReadFile(path string) ([]byte,error) {
 }
 
 func TestOsdetect(t *testing.T) {
-	oldgoos := goos
-	defer func() { goos = oldgoos }()
 	oldReadFile := ReadFile
 	defer func() { ReadFile = oldReadFile }()
-	goos = "windows"
+	goos := "windows"
 	ReadFile = mockReadFile
 	theos := osdetect()
 	if theos != goos {

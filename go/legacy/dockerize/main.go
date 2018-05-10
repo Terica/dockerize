@@ -226,8 +226,8 @@ func copySelfToTemp() {
 		// .linux will be this binary built for linux
 		absSelf = strings.TrimSuffix(absSelf, ".exe") + ".linux"
 	}
-	cmdOutput, _ := exec.Command("docker", "run", "-i", "--rm", "-v", absSelf+":/bin/dockerize:ro",
-		"-v", "/tmp:/share", "alpine", "cp", "/bin/dockerize", "/share/").CombinedOutput()
+	cmdOutput, _ := exec.Command("docker",strings.Split("run -i --rm -v " + absSelf + ":/bin/dockerize:ro " +
+		"-v /tmp:/share alpine cp /bin/dockerize /share/"," ")...).CombinedOutput()
 	fmt.Print(string(cmdOutput))
 	cmdOutput, _ = exec.Command("docker", "run", "-i", "--rm", "-v", "/tmp/dockerize:/bin/execwdve:ro",
 		"alpine", "execwdve").CombinedOutput()
@@ -339,6 +339,7 @@ func runCommand(command string) {
 			ConvertPath(port.Home) + "/.ssh/known_hosts:/etc/ssh/ssh_known_hosts",
 			absSelf + ":/bin/execwdve:ro"}
 		for _, volume := range config.Containers[containername].Volumes {
+			fmt.Printf("%s\n", volume)
 			expanded := os.ExpandEnv(volume)
 			containerVolumes = append(containerVolumes, expanded)
 		}
