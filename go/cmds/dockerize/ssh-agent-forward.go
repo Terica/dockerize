@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/fayep/dockerize/go/docker"
 	"io"
 	"io/ioutil"
 	"os"
@@ -18,7 +19,7 @@ func init() {
 	programMode["ssh-agent-forward"] = sshAgentForwarder
 }
 
-func sshAgentForwarder() int {
+func sshAgentForwarder(cli docker.Docker) int {
 	forwardPath = filepath.FromSlash("/share/agent_socket_path")
 	if authSockPath, found := os.LookupEnv("SSH_AUTH_SOCK"); found {
 		os.Chown(authSockPath, 1000, 1000)

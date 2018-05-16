@@ -11,7 +11,7 @@ import (
 // programMode is used to store a lookup table of command names we process in particular functions
 // _ represents a default value
 
-type modeFunc func() int
+type modeFunc func(docker.Docker) int
 
 var (
 	// This means we have an initialized map before the init() functions run.
@@ -41,16 +41,16 @@ func ParseProgram(arg string) (string, string) {
 
 func main() {
 	var ret int
+	cli := docker.Connect()
 	if fn, ok := programMode[programName]; ok {
-		ret = fn()
+		ret = fn(cli)
 	} else {
-		ret = programMode["_"]()
+		ret = programMode["_"](cli)
 	}
 	os.Exit(ret)
 }
 
-func modeIndirect() int {
-	cli := docker.Connect()
+func modeIndirect(cli docker.Docker) int {
 	prog := progress.New(fmt.Sprintf("Starting Container for %s", programName), 0, 0)
 	//fmt.Printf("It was %s\n", programName)
 	cli.Pull(programName, "latest", prog)

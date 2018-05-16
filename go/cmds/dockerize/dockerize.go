@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/fayep/dockerize/go/docker"
 	"os"
 )
 
@@ -11,10 +12,10 @@ const dockerizeHelp = `
 | | | |/ _ \ / __| |/ / _ \ '__| |_  / _ \
 | |_| | (_) | (__|   <  __/ |  | |/ /  __/
 |____/ \___/ \___|_|\_\___|_|  |_/___\___|
-Like Busybox for programming utilizing Docker
-Docker and Dockerize are my Desert Island Discs
+Like Busybox for programming utilizing docker.Docker
+docker.Docker and docker.Dockerize are my Desert Island Discs
 
-With Docker and Dockerize you can do development within containers which
+With docker.Docker and docker.Dockerize you can do development within containers which
 work as if they were part of your native development environment.
 
 [download dockerize and docker on new laptop]
@@ -55,7 +56,7 @@ func dockerizeInstall() int {
 	return 0
 }
 
-func modeDockerize() int {
+func modeDockerize(cli docker.Docker) int {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "help":

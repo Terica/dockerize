@@ -1,21 +1,36 @@
 // +build !mocker
 
+// Package docker is a convenience wrapper for fsouza's go-dockerclient
 package docker
 
 import (
 	"bytes"
-	"context"
 	"encoding/gob"
 	"encoding/json"
-	"fmt"
 	"github.com/fayep/dockerize/go/progress"
-	"golang.org/x/crypto/ssh/terminal"
 	"io"
 	"io/ioutil"
-	"os"
-
-	docker "github.com/fsouza/go-dockerclient"
 )
+
+// Docker interface.
+type Docker interface {
+	PStat(map[string][]string) []APIContainers
+	Pull(string, string, *progress.Progress)
+	Run(string, string, []string, []string, []string) (string, error)
+	Exec(string, []string, string, []string) (int, error)
+}
+
+// Docker interface.
+type Mocker interface {
+	Docker
+	AddContainer(APIContainers)
+	RemoveContainer(string)
+	AddImage(APIContainers)
+	RemoveImage(string)
+	ClearFlags()
+	SetFlag(string, bool)
+	GetFlag(string) bool
+}
 
 // ProgressDetail used by status updates of at least "Pull"
 type ProgressDetail struct {
@@ -28,11 +43,6 @@ type StatusUpdate struct {
 	ID     string          `json:"id"`
 	Status string          `json:"status"`
 	Detail *ProgressDetail `json:"progressDetail"`
-}
-
-// Client wraps a docker client
-type Client struct {
-	*docker.Client
 }
 
 // APIPort is a type that represents a port mapping returned by the Docker API
@@ -75,6 +85,7 @@ type NetworkList struct {
 }
 
 // APIContainers show API Container state
+
 type APIContainers struct {
 	ID         string            `json:"Id" yaml:"Id" toml:"Id"`
 	Image      string            `json:"Image,omitempty" yaml:"Image,omitempty" toml:"Image,omitempty"`
@@ -91,49 +102,17 @@ type APIContainers struct {
 	Mounts     []APIMount        `json:"Mounts,omitempty" yaml:"Mounts,omitempty" toml:"Mounts,omitempty"`
 }
 
+// DeepCopy uses reflection to map a source struct into a destination one.
+// gob is used as the encoding.
 func DeepCopy(from interface{}, to interface{}) error {
 	buf := bytes.Buffer{}
 	enc := gob.NewEncoder(&buf)
 	dec := gob.NewDecoder(&buf)
-	go enc.Encode(from)
+	if err := enc.Encode(from); err != nil {
+		return err
+	}
 	err := dec.Decode(to)
 	return err
-}
-
-// Connect connects you to docker via the environment
-func Connect() *Client {
-	cli, _ := docker.NewClientFromEnv()
-	return &Client{cli}
-}
-
-// PStat gets you a list of running containers
-func (cli *Client) PStat(filters map[string][]string) []APIContainers {
-	listContainersOptions := docker.ListContainersOptions{
-		Filters: filters,
-		Context: context.Background(),
-	}
-	cont, _ := cli.ListContainers(listContainersOptions)
-	var containers []APIContainers
-	DeepCopy(cont, containers)
-	return containers
-}
-
-// Pull retrieves a container image from a repository
-func (cli *Client) Pull(image string, tag string, pb *progress.Progress) {
-	status := new(bytes.Buffer)
-	pullImageOptions := docker.PullImageOptions{
-		Repository:    image,
-		Tag:           tag,
-		OutputStream:  status,
-		RawJSONStream: true,
-		Context:       context.Background(),
-	}
-	authConfig := docker.AuthConfiguration{}
-	if err := cli.PullImage(pullImageOptions, authConfig); err != nil {
-		fmt.Printf("Error: %s\n", err.Error())
-	} else {
-		manageProgress(status, pb)
-	}
 }
 
 func manageProgress(status io.Reader, pb *progress.Progress) {
@@ -158,81 +137,5 @@ func manageProgress(status io.Reader, pb *progress.Progress) {
 			}
 		}
 		pb.Done()
-	}
-}
-
-// Run a container
-// env represents additional environment variables
-// mnts maps to binds because that's obvious.
-func (cli *Client) Run(imageID string, name string, mnts []string, env []string, cmd []string) (string, error) {
-	createContainerOptions := docker.CreateContainerOptions{
-		Name:    name,
-		Context: context.Background(),
-		Config: &docker.Config{
-			Image: imageID,
-			Cmd:   cmd,
-			Tty:   true,
-			Env:   env,
-		},
-		HostConfig: &docker.HostConfig{
-			NetworkMode: "host",
-			AutoRemove:  false,
-			Binds:       mnts,
-		},
-	}
-	resp, err := cli.CreateContainer(createContainerOptions)
-	if err != nil {
-		return "", err
-	}
-	err = cli.StartContainer(resp.ID, nil)
-	if err != nil {
-		return "", err
-	}
-	return resp.ID, nil
-}
-
-// Exec something in an existing container
-func (cli *Client) Exec(container string, env []string, wd string, cmd []string) (int, error) {
-	fd := int(os.Stdin.Fd())
-	tty := false
-	if terminal.IsTerminal(fd) {
-		oldState, err := terminal.MakeRaw(fd)
-		if err != nil {
-			// handle err ...
-		}
-		defer terminal.Restore(fd, oldState)
-		tty = true
-	}
-	createExecOptions := docker.CreateExecOptions{
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		Tty:          tty,
-		Cmd:          cmd,
-		Env:          env,
-		WorkingDir:   wd,
-		Container:    container,
-		Context:      context.Background(),
-	}
-	id := ""
-	if resp, err := cli.CreateExec(createExecOptions); err != nil {
-		return 255, err
-	} else {
-		id = resp.ID
-	}
-	startExecOptions := docker.StartExecOptions{
-		OutputStream: os.Stdout,
-		ErrorStream:  os.Stderr,
-		InputStream:  os.Stdin,
-		RawTerminal:  false,
-	}
-	if err := cli.StartExec(id, startExecOptions); err != nil {
-		return 255, err
-	}
-	if resp, err := cli.InspectExec(id); err != nil {
-		return 255, err
-	} else {
-		//fmt.Printf("%+v\n", resp)
-		return resp.ExitCode, nil
 	}
 }
