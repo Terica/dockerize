@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"local/dockerize/docker"
-	"local/dockerize/progress"
+	"github.com/fayep/dockerize/go/docker"
+	"github.com/fayep/dockerize/go/progress"
 	"os"
 	"path/filepath"
 )
@@ -53,13 +53,13 @@ func modeIndirect() int {
 	cli := docker.Connect()
 	prog := progress.New(fmt.Sprintf("Starting Container for %s", programName), 0, 0)
 	//fmt.Printf("It was %s\n", programName)
-	cli.Pull(programName,"latest", prog)
-	containers := cli.PStat(map[string][]string{"name": []string{programName+"_latest"}})
+	cli.Pull(programName, "latest", prog)
+	containers := cli.PStat(map[string][]string{"name": []string{programName + "_latest"}})
 	var id string
-	if len(containers)>0 {
+	if len(containers) > 0 {
 		id = containers[0].ID
 	} else {
-		if ret, err := cli.Run(programName+":latest", programName+"_latest", []string{"/c/Users/faye:/c/Users/faye"},nil,[]string{"cat"}); err != nil {
+		if ret, err := cli.Run(programName+":latest", programName+"_latest", []string{"/c/Users/faye:/c/Users/faye"}, nil, []string{"cat"}); err != nil {
 			fmt.Printf("%s\n", error.Error(err))
 		} else {
 			id = ret

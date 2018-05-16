@@ -20,7 +20,7 @@ func build() {
 }
 
 func checkRunning() bool {
-
+	if 
 }
 
 // Run is the main entrypoint to pinata, we just want to make sure Pinata container is running

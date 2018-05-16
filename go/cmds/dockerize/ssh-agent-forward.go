@@ -28,6 +28,7 @@ func sshAgentForwarder() int {
 		}
 		fmt.Printf("Found SSH-Agent-Socket at %s\n", authSockPath)
 		fmt.Printf("Storing that location at %s until exit\n", forwardPath)
+		// Discard any input - basically wait until interrupted
 		io.Copy(ioutil.Discard, os.Stdin)
 	}
 	return 0
