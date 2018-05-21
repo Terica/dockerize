@@ -1,4 +1,10 @@
-// Package docker is a convenience wrapper for fsouza's go-dockerclient
+/*
+It contains a set of functions useful for mocking out docker calls
+to help with testing your code without invoking real docker.
+
+It is designed to wrap the Docker interface while adding functions to
+modify state.
+*/
 package docker
 
 import (
@@ -25,11 +31,13 @@ var _ Mocker = (*MockClient)(nil)
 
 // PStat gets you a list of running containers
 func (cli *MockClient) PStat(filters map[string][]string) []APIContainers {
-	return cli.containers
+	return cli.images
 }
 
 // Pull retrieves a container image from a repository
 func (cli *MockClient) Pull(image string, tag string, pb *progress.Progress) {
+	container := APIContainers{Image: image + ":" + tag}
+	cli.containers = append(cli.containers, container)
 }
 
 // Run a container

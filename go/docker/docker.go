@@ -1,6 +1,12 @@
-// +build !mocker
+/*
+Package docker is a convenience wrapper for fsouza/go-dockerclient
 
-// Package docker is a convenience wrapper for fsouza's go-dockerclient
+It was designed to be more like the command line and does so by removing access to
+some of the more rarely used options.
+
+Each activity performed is exposed as a single method call and wraps one or more
+underlying methods.
+*/
 package docker
 
 import (

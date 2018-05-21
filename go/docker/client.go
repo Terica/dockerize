@@ -1,6 +1,3 @@
-// +build !mocker
-
-// Package docker is a convenience wrapper for fsouza's go-dockerclient
 package docker
 
 import (
