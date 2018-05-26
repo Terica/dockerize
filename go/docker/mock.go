@@ -8,7 +8,11 @@ modify state.
 package docker
 
 import (
+	"crypto/rand"
+	"fmt"
 	"github.com/fayep/dockerize/go/progress"
+	"log"
+	"strings"
 )
 
 // It uses an anonymous docker.Client to store the real handle
@@ -29,13 +33,25 @@ func MockConnect() Mocker {
 // The linter won't error here even if the interface isn't fully implemented
 var _ Mocker = (*MockClient)(nil)
 
+func NewID() string {
+	p := make([]byte, 16)
+	rand.Read(p)
+	s := ""
+	for _, v := range p {
+		s = s + fmt.Sprintf("%02x", v)
+	}
+	return s
+}
+
 // PStat gets you a list of running containers
 func (cli *MockClient) PStat(filters map[string][]string) []APIContainers {
+	log.Printf("PStat: %+v\n", cli.images)
 	return cli.images
 }
 
 // Pull retrieves a container image from a repository
 func (cli *MockClient) Pull(image string, tag string, pb *progress.Progress) {
+	log.Printf("Pull: %s\n", image+":"+tag)
 	container := APIContainers{Image: image + ":" + tag}
 	cli.containers = append(cli.containers, container)
 }
@@ -44,11 +60,15 @@ func (cli *MockClient) Pull(image string, tag string, pb *progress.Progress) {
 // env represents additional environment variables
 // mnts maps to binds because that's obvious.
 func (cli *MockClient) Run(imageID string, name string, mnts []string, env []string, cmd []string) (string, error) {
-	return imageID, nil
+	log.Printf("Run: %s in %s as %s\n", strings.Join(cmd, " "), imageID, name)
+	image := APIContainers{Image: imageID, ID: name}
+	cli.images = append(cli.images, image)
+	return name, nil
 }
 
 // Exec something in an existing container
 func (cli *MockClient) Exec(container string, env []string, wd string, cmd []string) (int, error) {
+	log.Printf("Exec: %s in %s\n", strings.Join(cmd, " "), container)
 	return 0, nil
 }
 

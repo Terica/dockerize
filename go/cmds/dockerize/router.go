@@ -41,7 +41,7 @@ func ParseProgram(arg string) (string, string) {
 
 func main() {
 	var ret int
-	cli := docker.Connect()
+	cli := docker.MockConnect()
 	if fn, ok := programMode[programName]; ok {
 		ret = fn(cli)
 	} else {

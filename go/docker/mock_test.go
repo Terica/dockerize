@@ -17,7 +17,7 @@ func TestMockConnect(t *testing.T) {
 
 func TestAddImage(t *testing.T) {
 	cli := MockConnect()
-	cli.AddImage(APIContainers{ID: "11111111"})
+	cli.AddImage(APIContainers{ID: NewID()})
 	l := len(cli.(*MockClient).images)
 	if l != 1 {
 		t.Errorf("There should be 1 container, there are %d", l)
@@ -26,7 +26,7 @@ func TestAddImage(t *testing.T) {
 
 func TestPStat(t *testing.T) {
 	cli := MockConnect()
-	cli.AddImage(APIContainers{ID: "11111111"})
+	cli.AddImage(APIContainers{ID: NewID()})
 	result := cli.PStat(map[string][]string{})
 	if len(result) != 1 {
 		t.Errorf("len(result) should be 1: %d\n", len(result))
